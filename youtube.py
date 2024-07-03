@@ -4,6 +4,7 @@ from streamlit_option_menu import option_menu
 import pandas as pd
 import mysql.connector
 import numpy as np
+from isodate import parse_duration
 from datetime import datetime
 import re
 
@@ -26,7 +27,7 @@ cursor.execute('use youtube_project')
 
 st.sidebar.title('Youtube Data Harvesting and Warehousing')
 
-  # channel_information:
+# channel_information:
 def get_youtubechannel_info(channel_id):
         if channel_id:
             request = youtube.channels().list(
@@ -46,9 +47,9 @@ def get_youtubechannel_info(channel_id):
                                     Playlist_id = i['contentDetails']['relatedPlaylists']['uploads'])
                                                                                             
                 return youtubedata
-        
 
-    #To get multiple video ids
+
+#To get multiple video ids
 
 def multi_video_id(channel_id):
         if channel_id:
@@ -70,7 +71,7 @@ def multi_video_id(channel_id):
             return video_id
 
 
-    #To get information about video ids
+#To get information about video ids
 
 def videoinformation(video_info):
         if video_info:    
@@ -88,9 +89,11 @@ def videoinformation(video_info):
                                     Video_Id = vidinfo['id'],
                                     Video_Name = vidinfo['snippet']['title'],
                                     View_Counts = vidinfo['statistics']['viewCount'],
-                                    Like_Count = vidinfo.get('likeCount'),
+                                    Like_Count = vidinfo['statistics'].get('likeCount'),
+                                    Dislike_count = vidinfo.get('dislikeCount'),
+                                    Duration = parse_duration(vidinfo['contentDetails']['duration']).total_seconds(),
                                     PublishedAt = vidinfo['snippet']['publishedAt'],
-                                    Duration = vidinfo['contentDetails']['duration'],
+                                    Comment_Count = vidinfo['statistics'].get('commentCount'),
                                     Thumbnail = vidinfo['snippet']['thumbnails']['default']['url'],
                                     Description = vidinfo['snippet']['description'],
                                     Caption_Status = vidinfo['contentDetails']['caption'])
@@ -98,7 +101,7 @@ def videoinformation(video_info):
                     video_data.append(youtubedata)
             return video_data
 
-    # To get video comment information
+# To get video comment information
 
 def get_videocomments(comment_info):
         if comment_info:    
@@ -138,14 +141,15 @@ def create_table(cursor):
                                                     Playlist_id varchar(255)
                                                     )'''
             
-            video_table = ''' create table if not exists videos1(Channel_Id varchar(100),
+            video_table = ''' create table if not exists videos(Channel_Id varchar(100),
                                                                 Channel_Name varchar(100),
                                                                 Video_Id varchar(30) primary key,
                                                                 Video_Name varchar(150),
                                                                 View_Counts INT,
                                                                 Like_Count INT,
-                                                                Duration varchar(50) 
-                                                                PublishedAt varchar(255), 
+                                                                Dislike_count INT,
+                                                                Duration FLOAT, 
+                                                                PublishedAt DATETIME, 
                                                                 Comment_Count INT
                                                                 Thumbnail varchar(200),
                                                                 Description text,
@@ -168,7 +172,7 @@ def insert_channel_data(channel_df):
                     
         cursor = mydb.cursor()
         for index,row in channel_df.iterrows():
-                        insert_query = '''insert into channels(Channel_ID,
+                    insert_query = '''insert into channels(Channel_ID,
                                                 Channel_Name, 
                                                 Subscription_Count, 
                                                 Channel_Views, 
@@ -176,7 +180,7 @@ def insert_channel_data(channel_df):
                                                 Channel_Description,
                                                 Playlist_id) 
                                                 values(%s,%s,%s,%s,%s,%s,%s)'''
-                        values = (row['Channel_ID'],
+                    values = (row['Channel_ID'],
                                 row['Channel_Name'],
                                 row['Subscription_Count'],
                                 row['Channel_Views'],
@@ -193,14 +197,15 @@ def insert_video_data(video_df):
                 cursor = mydb.cursor()
                 
                 for index,row in video_df.iterrows():
-                    insert_query = '''insert ignore into videos(Channel_Id,Channel_Name,Video_Id,Video_Name,View_Counts,Like_Count,Duration,PublishedAt,Comment_Count,Thumbnail,Description,Caption_Status) 
-                                                        values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'''
+                    insert_query = '''insert ignore into videos(Channel_Id,Channel_Name,Video_Id,Video_Name,View_Counts,Like_Count,Dislike_count,Duration,PublishedAt,Comment_Count,Thumbnail,Description,Caption_Status) 
+                                                        values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'''
                     values = (row['Channel_Id'],
                             row['Channel_Name'],
                             row['Video_Id'],
                             row['Video_Name'],
                             row['View_Counts'],
                             row['Like_Count'],
+                            row['Dislike_count'],
                             row['Duration'],
                             row['PublishedAt'],
                             row['Comment_Count'],
@@ -254,12 +259,14 @@ def main():
                 channel_df = pd.DataFrame(channel_data, index=[0])
                 st.subheader("Channel Information")
                 st.dataframe(channel_df)
+                st.success("Channel information fetched successfully!")
 
                 # Fetching multiple video IDs
                 multiplevideo = multi_video_id(channel_id)
                 if multiplevideo:
                     st.subheader("Multiple Video IDs")
                     st.dataframe(pd.DataFrame({'Video_ID': multiplevideo}))
+                    st.success("Multiple video IDs fetched successfully!")
 
                     # Fetching video information
                     videos_data = videoinformation(multiplevideo)
@@ -267,6 +274,7 @@ def main():
                         st.subheader("Video Information")
                         video_df = pd.DataFrame(videos_data)
                         st.dataframe(video_df)
+                        st.success("Video information fetched successfully!")
 
                     # Fetching video comments
                     comment_data = get_videocomments(multiplevideo)
@@ -274,17 +282,19 @@ def main():
                         st.subheader("Video Comments")
                         comment_df = pd.DataFrame(comment_data)
                         st.dataframe(comment_df)
+                        st.success("Video comments fetched successfully!")
+
     #SQL QUERIES Page:
     elif selected == "SQL Queries":
         st.header(':blue[Queries and Results ]')
         st.write('''In this page, we have the results to the queries that have been asked of us based on the channel data we have collected and migrated to SQL ''')
 
 # Function to display SQL queries and their solutions
-    def predefined_queries():
-        st.title("SQL queries")
+        def predefined_queries():
+            st.title("SQL queries")
             
-        #SQL queries and their descriptions
-        question = st.selectbox('Select your Question from dropdown :',
+            #SQL queries and their descriptions
+            question = st.selectbox('Select your Question from dropdown :',
                                     ['1. What are the names of all the videos and their corresponding channels?',
                                     '2. Which channels have the most number of videos, and how many videos do they have?',
                                     '3. What are the top 10 most viewed videos and their respective channels?',
@@ -297,79 +307,79 @@ def main():
                                     '10. Which videos have the highest number of comments, and what are their corresponding channel names?'])
                                     
 
-        if question == '1. What are the names of all the videos and their corresponding channels?':
-            query1 = '''SELECT Channel_Name, Video_Name FROM videos ORDER BY Channel_Name;'''
-            cursor.execute(query1)
-            row1=cursor.fetchall()
-            df1=pd.DataFrame(row1,columns=['Channel Name', 'Video Name'])
-            st.write(df1) 
+            if question == '1. What are the names of all the videos and their corresponding channels?':
+                query1 = '''SELECT Channel_Name, Video_Name FROM videos ORDER BY Channel_Name;'''
+                cursor.execute(query1)
+                row1=cursor.fetchall()
+                df1=pd.DataFrame(row1,columns=['Channel Name', 'Video Name'])
+                st.write(df1) 
         
-        elif question == '2. Which channels have the most number of videos, and how many videos do they have?':
-            query2 = """SELECT Channel_Name as Chan_name, Total_videos as Tot_videos FROM channels ORDER BY Total_videos DESC"""
-            cursor.execute(query2)
-            row2=cursor.fetchall()
-            df2 = pd.DataFrame(row2,columns=['Chan_name','Tot_videos'])
-            st.write(df2) 
+            elif question == '2. Which channels have the most number of videos, and how many videos do they have?':
+                query2 = """SELECT Channel_Name as Chan_name, Total_videos as Tot_videos FROM channels ORDER BY Total_videos DESC"""
+                cursor.execute(query2)
+                row2=cursor.fetchall()
+                df2 = pd.DataFrame(row2,columns=['Chan_name','Tot_videos'])
+                st.write(df2) 
 
-        elif question == '3. What are the top 10 most viewed videos and their respective channels?':
-            query3 = '''SELECT Video_Id, Video_Name, View_Counts, Channel_Name FROM videos ORDER BY View_Counts DESC LIMIT 10;'''
-            cursor.execute(query3)
-            row3=cursor.fetchall()
-            df3 = pd.DataFrame(row3,columns=['Video_Id','Video Name', 'View Counts','Channel Name'])
-            st.write(df3) 
+            elif question == '3. What are the top 10 most viewed videos and their respective channels?':
+                query3 = '''SELECT Video_Id, Video_Name, View_Counts, Channel_Name FROM videos ORDER BY View_Counts DESC LIMIT 10;'''
+                cursor.execute(query3)
+                row3=cursor.fetchall()
+                df3 = pd.DataFrame(row3,columns=['Video_Id','Video Name', 'View Counts','Channel Name'])
+                st.write(df3) 
 
-        elif question == '4. How many comments were made on each video, and what are their corresponding video names?':
-            query4 = '''SELECT Video_Id, Video_Name, Comment_Count FROM videos ORDER BY Comment_Count DESC;'''
-            cursor.execute(query4)
-            row4=cursor.fetchall()
-            df4 = pd.DataFrame(row4, columns=['Video ID','Video Name','Comment count'])
-            st.write(df4)
+            elif question == '4. How many comments were made on each video, and what are their corresponding video names?':
+                query4 = '''SELECT Video_Id, Video_Name, Comment_Count FROM videos ORDER BY Comment_Count DESC;'''
+                cursor.execute(query4)
+                row4=cursor.fetchall()
+                df4 = pd.DataFrame(row4, columns=['Video ID','Video Name','Comment count'])
+                st.write(df4)
 
-        elif question == '5. Which videos have the highest number of likes, and what are their corresponding channel names?':
-            query5 = '''SELECT Video_Id, Video_Name, Like_Count, Channel_Name FROM videos ORDER BY Like_Count DESC;'''
-            cursor.execute(query5)
-            row5=cursor.fetchall()
-            df5 = pd.DataFrame(row5, columns=['Video ID','Video Name', 'Like count','Channel Name'])
-            st.write(df5)
+            elif question == '5. Which videos have the highest number of likes, and what are their corresponding channel names?':
+                query5 = '''SELECT Video_Id, Video_Name, Like_Count, Channel_Name FROM videos ORDER BY Like_Count DESC;'''
+                cursor.execute(query5)
+                row5=cursor.fetchall()
+                df5 = pd.DataFrame(row5, columns=['Video ID','Video Name', 'Like count','Channel Name'])
+                st.write(df5)
 
-        elif question == '6. What is the total number of likes and dislikes for each video, and what are their corresponding video names?':
-            query6 = '''SELECT Video_Id, Video_Name, Like_Count FROM videos ORDER BY Like_Count DESC;"'''
-            cursor.execute(query6)
-            row6=cursor.fetchall()
-            df6 = pd.DataFrame(row6, columns=['Video ID','Video Name','Like count'])
-            st.write(df6)
+            elif question == '6. What is the total number of likes and dislikes for each video, and what are their corresponding video names?':
+                query6 = '''SELECT Video_Id, Video_Name, Like_Count FROM videos ORDER BY Like_Count DESC;"'''
+                cursor.execute(query6)
+                row6=cursor.fetchall()
+                df6 = pd.DataFrame(row6, columns=['Video ID','Video Name','Like count'])
+                st.write(df6)
 
-        elif question == '7. What is the total number of views for each channel, and what are their corresponding channel names?':
-            query7 = '''SELECT Channel_ID, Channel_Name, Channel_Views FROM channels ORDER BY Channel_Views DESC;'''
-            cursor.execute(query7)
-            row7=cursor.fetchall()
-            df7 = pd.DataFrame(row7, columns=['Channel ID', 'Channel Name','Total number of views'])
-            st.write(df7)
+            elif question == '7. What is the total number of views for each channel, and what are their corresponding channel names?':
+                query7 = '''SELECT Channel_ID, Channel_Name, Channel_Views FROM channels ORDER BY Channel_Views DESC;'''
+                cursor.execute(query7)
+                row7=cursor.fetchall()
+                df7 = pd.DataFrame(row7, columns=['Channel ID', 'Channel Name','Total number of views'])
+                st.write(df7)
 
-        elif question == '8. What are the names of all the channels that have published videos in the year 2022?':
-            query8 = '''SELECT distinct(Channel_Name), YEAR(PublishedAt) FROM videos WHERE YEAR(PublishedAt) = 2022 ORDER BY Channel_Name;'''
-            cursor.execute(query8)
-            row8=cursor.fetchall()
-            df8 = pd.DataFrame(row8, columns=['Channel Name', 'Video Published Year'])
-            st.write(df8)
+            elif question == '8. What are the names of all the channels that have published videos in the year 2022?':
+                query8 = '''SELECT distinct(Channel_Name), YEAR(PublishedAt) FROM videos WHERE YEAR(PublishedAt) = 2022 ORDER BY Channel_Name;'''
+                cursor.execute(query8)
+                row8=cursor.fetchall()
+                df8 = pd.DataFrame(row8, columns=['Channel Name', 'Video Published Year'])
+                st.write(df8)
 
-        elif question == '9. What is the average duration of all videos in each channel, and what are their corresponding channel names?':
-            query9 = '''SELECT Channel_Id, Channel_Name, ROUND(AVG(Duration/60), 2) AS avg_duration 
-                    FROM videos GROUP BY Channel_Id, Channel_Name ORDER BY ROUND(AVG(Duration/60), 2) DESC;''' 
-            cursor.execute(query9)
-            row9=cursor.fetchall()
-            df9 = pd.DataFrame(row9, columns=['Channel ID','Channel Name', 'avg_duration'])
-            st.write(df9)
+            elif question == '9. What is the average duration of all videos in each channel, and what are their corresponding channel names?':
+                query9 = '''SELECT Channel_Id, Channel_Name, ROUND(AVG(Duration/60),2) AS avg_duration 
+                        FROM videos GROUP BY Channel_Id, Channel_Name ORDER BY ROUND(AVG(Duration/60),2) DESC;''' 
+                cursor.execute(query9)
+                row9=cursor.fetchall()
+                df9 = pd.DataFrame(row9, columns=['Channel ID','Channel Name', 'avg_duration'])
+                st.write(df9)
 
-        elif question == '10. Which videos have the highest number of comments, and what are their corresponding channel names?':
-            query10 = '''SELECT Channel_Name, Video_Name, Comment_Count FROM videos ORDER BY Comment_Count DESC;'''
-            cursor.execute(query10)
-            row10=cursor.fetchall()
-            df10 = pd.DataFrame(row10, columns=['Channel Name', 'Video Name', 'Number of Comments'])
-            st.write(df10)
+            elif question == '10. Which videos have the highest number of comments, and what are their corresponding channel names?':
+                query10 = '''SELECT Channel_Name, Video_Name, Comment_Count FROM videos ORDER BY Comment_Count DESC;'''
+                cursor.execute(query10)
+                row10=cursor.fetchall()
+                df10 = pd.DataFrame(row10, columns=['Channel Name', 'Video Name', 'Number of Comments'])
+                st.write(df10)
 
-        mydb.close()
-    predefined_queries()
+            mydb.close()
+        predefined_queries()
 
 if __name__ == '__main__':
     main()
